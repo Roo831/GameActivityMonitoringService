@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: GameActivityMonitoringService
+server:
+  port: 8083
+
+se:
+  monitor:
+    server-ip: "5.9.118.202"
+    query-port: 27021
+    log-file-path: "./activity_log.txt"
+
+discord:
+  bot:
+    token: ${DISCORD_BOT_TOKEN:NOT_SET}
