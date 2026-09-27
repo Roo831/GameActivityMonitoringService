@@ -51,7 +51,7 @@ public class PlayerActivityTracker {
             if (isFirstScan) {
                 lastOnlinePlayers.addAll(currentOnline);
                 isFirstScan = false;
-                System.out.println("[INFO] Мониторинг успешно запущен.");
+                System.out.println("[INFO] Monitoring successfully started.");
                 return;
             }
 
@@ -71,7 +71,7 @@ public class PlayerActivityTracker {
             lastOnlinePlayers.addAll(currentOnline);
 
         } catch (Exception e) {
-            System.err.println("[ERROR] Ошибка опроса игрового сервера: " + e.getMessage());
+            System.err.println("[ERROR] Game server polling error: " + e.getMessage());
         }
     }
 
@@ -82,7 +82,7 @@ public class PlayerActivityTracker {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFileName, true))) {
             writer.write(logLine);
         } catch (IOException e) {
-            System.err.println("[ERROR] Не удалось записать лог в файл: " + e.getMessage());
+            System.err.println("[ERROR] Failed to write the log to the file: " + e.getMessage());
         }
     }
 }

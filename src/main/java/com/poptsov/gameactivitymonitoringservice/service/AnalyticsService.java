@@ -30,7 +30,7 @@ public class AnalyticsService {
 
     public String getPlayerReport(String nickname, int days) {
         if (!Files.exists(Paths.get(logFileName))) {
-            return "Файл статистики отсутствует.";
+            return "Statistics file is missing.";
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -84,11 +84,11 @@ public class AnalyticsService {
 
         } catch (IOException e) {
             e.printStackTrace();
-            return "Ошибка ввода-вывода при чтении логов: " + e.getMessage();
+            return "I/O error while reading logs: " + e.getMessage();
         }
 
         if (dailySessions.isEmpty()) {
-            return String.format("Игрок %s не появлялся в сети за последние %d дней.", nickname, days);
+            return String.format("Player %s has not been online for the last %d days.", nickname, days);
         }
 
         return buildMilitaryReport(nickname, days, dailySessions, globalHourlyStats);
@@ -96,13 +96,13 @@ public class AnalyticsService {
 
     public String getRawDataReport(String nickname, int days) {
         if (!Files.exists(Paths.get(logFileName))) {
-            return "Файл статистики отсутствует.";
+            return "Statistics file is missing.";
         }
 
         LocalDateTime thresholdDate = LocalDateTime.now().minusDays(days);
         StringBuilder sb = new StringBuilder();
 
-        sb.append(String.format("**СЫРЫЕ ЛОГИ ЦЕЛИ: %s** (За последние %d дней)\n", nickname.toUpperCase(), days));
+        sb.append(String.format("**RAW LOGS TARGET: %s** (Last %d days))\n", nickname.toUpperCase(), days));
         sb.append("--------------------------------------------------\n```text\n");
 
         int linesCount = 0;
@@ -130,18 +130,18 @@ public class AnalyticsService {
             }
         } catch (IOException e) {
             e.printStackTrace();
-            return "Ошибка ввода-вывода при чтении сырых логов: " + e.getMessage();
+            return "Input/Output error while reading raw logs: " + e.getMessage();
         }
 
         sb.append("```");
 
         if (linesCount == 0) {
-            return String.format("Записей по игроку %s за %d дней не найдено.", nickname, days);
+            return String.format("No records found for player %s for %d days.", nickname, days);
         }
 
         // Защита от превышения лимита Discord (2000 символов)
         if (sb.length() > 1950) {
-            return sb.substring(0, 1900) + "\n...[ЛОГ ОБРЕЗАН: ПРЕВЫШЕН ЛИМИТ ДИСКОРДА]```";
+            return sb.substring(0, 1900) + "\n...[LOG TRUNCATED: DISCORD LIMIT EXCEEDED]```";
         }
 
         return sb.toString();
@@ -165,7 +165,7 @@ public class AnalyticsService {
     public String buildListOfAllNames(int days) {
         StringBuilder sb = new StringBuilder();
         LocalDateTime thresholdDate = LocalDateTime.now().minusDays(days);
-        sb.append(String.format("**Все никнеймы активных игроков за последние %d дней:**\n", days));
+        sb.append(String.format("**All nicknames of active players over the last %d days:**\n", days));
         sb.append("--------------------------------------------------\n\n");
 
         // TreeSet с игнорированием регистра для уникальности и красивого алфавитного порядка
@@ -190,11 +190,11 @@ public class AnalyticsService {
             }
         } catch (IOException e) {
             e.printStackTrace();
-            return "Ошибка ввода-вывода при чтении имен: " + e.getMessage();
+            return "I/O error while reading names: " + e.getMessage();
         }
 
         if (names.isEmpty()) {
-            return "Активных игроков за этот период не найдено.";
+            return "No active players were found for this period.";
         }
 
         for (String name : names) {
@@ -213,7 +213,7 @@ public class AnalyticsService {
 
         double totalPeriodHours = 0;
 
-        sb.append("**ХРОНОЛОГИЯ ПО ДНЯМ:**\n");
+        sb.append("**DAY-BY-DAY CHRONOLOGY:**\n");
         for (Map.Entry<LocalDate, List<GameSessionInterval>> entry : dailySessions.entrySet()) {
             LocalDate date = entry.getKey();
             List<GameSessionInterval> sessions = entry.getValue();
@@ -231,12 +231,12 @@ public class AnalyticsService {
             }
 
             totalPeriodHours += dayHours;
-            sb.append(String.format("• **%s** (Общее время: %.1f ч.)\n", date.toString(), dayHours));
+            sb.append(String.format("• **%s** (Total time: %.1f h.)\n", date.toString(), dayHours));
             sb.append(intervalsSb);
         }
 
-        sb.append("\n**АНАЛИЗ ПЕРИОДОВ АКТИВНОСТИ:**\n");
-        sb.append(String.format("Суммарное время в онлайне за весь период: %.1f ч.\n", totalPeriodHours));
+        sb.append("\n**ANALYSIS OF ACTIVITY PERIODS:**\n");
+        sb.append(String.format("Total online time for the entire period: %.1f h.\n", totalPeriodHours));
 
         if (!globalHourlyStats.isEmpty()) {
             int peakHourStart = globalHourlyStats.entrySet().stream()
@@ -244,7 +244,7 @@ public class AnalyticsService {
                     .map(Map.Entry::getKey)
                     .orElse(0);
 
-            sb.append(String.format("Час наивысшей вероятности присутствия: %02d:00 — %02d:00\n",
+            sb.append(String.format("Hour of peak probability of presence: %02d:00 — %02d:00\n",
                     peakHourStart, (peakHourStart + 1) % 24));
         }
 
