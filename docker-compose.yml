@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  game-monitor-backend:
+    build: .
+    container_name: game-monitor-backend
+    restart: always
+    ports:
+      - "8083:8083"
+    env_file:
+      - keys.env
+    environment:
+      - SE_MONITOR_SERVER_IP=5.9.118.202
+      - SE_MONITOR_QUERY_PORT=27021
+      - SE_MONITOR_LOG_FILE_PATH=/app/logs/activity_log.txt
+    volumes:
+      - ./server_logs:/app/logs

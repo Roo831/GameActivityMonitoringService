@@ -2,7 +2,6 @@ package com.poptsov.gameactivitymonitoringservice.core;
 
 import com.github.koraktor.steamcondenser.steam.SteamPlayer;
 import com.github.koraktor.steamcondenser.steam.servers.SourceServer;
-import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -33,11 +32,6 @@ public class PlayerActivityTracker {
 
     private boolean isFirstScan = true;
 
-    @PostConstruct
-    public void init() {
-        writeLog("Logging initialized\n");
-    }
-
     @Scheduled(fixedDelay = 60000)
     public void trackOnline() {
         try {
@@ -53,11 +47,11 @@ public class PlayerActivityTracker {
             }
 
             String currentTimestamp = LocalDateTime.now().format(formatter);
-            
+
             if (isFirstScan) {
                 lastOnlinePlayers.addAll(currentOnline);
                 isFirstScan = false;
-                System.out.println("[INFO] Первый запуск выполнен. Онлайн синхронизирован без записи CONNECT.");
+                System.out.println("[INFO] Мониторинг успешно запущен.");
                 return;
             }
 
@@ -89,14 +83,6 @@ public class PlayerActivityTracker {
             writer.write(logLine);
         } catch (IOException e) {
             System.err.println("[ERROR] Не удалось записать лог в файл: " + e.getMessage());
-        }
-    }
-
-    private void writeLog(String message) {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFileName, true))) {
-            writer.write(message);
-        } catch (IOException e) {
-            System.err.println("[ERROR] Не удалось записать сообщение в файл: " + e.getMessage());
         }
     }
 }

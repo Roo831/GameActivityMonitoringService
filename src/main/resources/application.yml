@@ -8,8 +8,8 @@ se:
   monitor:
     server-ip: "5.9.118.202"
     query-port: 27021
-    log-file-path: "./activity_log.txt"
+    log-file-path: "/app/logs/activity_log.txt"
 
-discord:
-  bot:
-    token: ${DISCORD_BOT_TOKEN:NOT_SET}
+api:
+  security:
+    key: ${API_KEY}
