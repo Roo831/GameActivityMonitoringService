@@ -2,6 +2,7 @@ package com.poptsov.gameactivitymonitoringservice.core;
 
 import com.github.koraktor.steamcondenser.steam.SteamPlayer;
 import com.github.koraktor.steamcondenser.steam.servers.SourceServer;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -73,6 +74,24 @@ public class PlayerActivityTracker {
         } catch (Exception e) {
             System.err.println("[ERROR] Game server polling error: " + e.getMessage());
         }
+    }
+
+
+    @PreDestroy
+    public void onShutdown() {
+        if (lastOnlinePlayers.isEmpty()) {
+            System.out.println("[INFO] Shutdown: No active players to disconnect.");
+            return;
+        }
+
+        String shutdownTimestamp = LocalDateTime.now().format(formatter);
+        System.out.println("[INFO] Shutdown: Writing DISCONNECT for " + lastOnlinePlayers.size() + " active players...");
+
+        for (String player : lastOnlinePlayers) {
+            writeLog(shutdownTimestamp, "DISCONNECT", player);
+        }
+
+        System.out.println("[INFO] Shutdown: All active players disconnected successfully.");
     }
 
     private void writeLog(String timestamp, String action, String nickname) {
