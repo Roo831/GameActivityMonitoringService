@@ -1,6 +1,7 @@
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-COPY target/*.jar app.jar
+# Исправлено: Gradle кладет jar в build/libs/
+COPY build/libs/*.jar app.jar
 RUN mkdir -p /app/logs
 ENV JAVA_OPTS="-Xms128m -Xmx256m"
 EXPOSE 8083
