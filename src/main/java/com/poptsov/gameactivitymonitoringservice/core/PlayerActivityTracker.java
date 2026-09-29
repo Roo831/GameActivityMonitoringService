@@ -24,7 +24,6 @@ public class PlayerActivityTracker {
     private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final Set<String> lastOnlinePlayers = new HashSet<>();
-    private boolean isFirstScan = true;
 
     public PlayerActivityTracker(String gameName, String serverIp, int queryPort, String logFilePath) {
         this.gameName = gameName;
@@ -35,9 +34,7 @@ public class PlayerActivityTracker {
 
     @Scheduled(fixedDelay = 60000)
     public void trackOnline() {
-
         if (serverIp == null || serverIp.trim().isEmpty()) {
-            System.err.println("[ERROR] [" + gameName + "] Ip field is clear.");
             return;
         }
 
@@ -55,12 +52,6 @@ public class PlayerActivityTracker {
 
             String currentTimestamp = LocalDateTime.now().format(formatter);
 
-            if (isFirstScan) {
-                lastOnlinePlayers.addAll(currentOnline);
-                isFirstScan = false;
-                System.out.println("[INFO] [" + gameName + "] Monitoring successfully started.");
-                return;
-            }
 
             for (String player : currentOnline) {
                 if (!lastOnlinePlayers.contains(player)) {
@@ -78,7 +69,8 @@ public class PlayerActivityTracker {
             lastOnlinePlayers.addAll(currentOnline);
 
         } catch (Exception e) {
-            System.err.println("[ERROR] [" + gameName + "] Game server polling error: " + e.getMessage());
+            System.err.println("[ERROR] [" + gameName + "] Game server polling error: " +
+                    e.getClass().getSimpleName() + " - " + e.getMessage());
         }
     }
 
