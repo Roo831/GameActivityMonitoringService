@@ -13,7 +13,7 @@ se:
 rust:
   monitor:
     server-ip: "80.242.59.104"
-    query-port: 35100
+    query-port: 35110
     log-file-path: "/app/logs/rust-activity_log.txt"
 
 api:
