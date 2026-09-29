@@ -1,7 +1,5 @@
 package com.poptsov.gameactivitymonitoringservice.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -16,17 +14,18 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Service
 public class AnalyticsService {
 
-    @Value("${se.monitor.log-file-path}")
-    private String logFileName;
+    private final String logFileName;
 
     private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    // Надежный паттерн для парсинга: [YYYY-MM-DD HH:MM:SS] [ACTION] Nickname
     // Группа 1: время, Группа 2: действие, Группа 3: никнейм (всё, что после действия, включая пробелы и скобки)
     private static final Pattern LOG_PATTERN = Pattern.compile("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] \\[(CONNECT|DISCONNECT)\\]\\s+(.+)$");
+
+    public AnalyticsService(String logFileName) {
+        this.logFileName = logFileName;
+    }
 
     public String getPlayerReport(String nickname, int days) {
         if (!Files.exists(Paths.get(logFileName))) {
@@ -208,7 +207,7 @@ public class AnalyticsService {
                                        Map<LocalDate, List<GameSessionInterval>> dailySessions,
                                        Map<Integer, Integer> globalHourlyStats) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("**СВОДКА АКТИВНОСТИ ЦЕЛИ: %s** (Период: %d дней)\n", nickname.toUpperCase(), days));
+        sb.append(String.format("**TARGET ACTIVITY SUMMARY: %s** (Period: %d days)\n", nickname.toUpperCase(), days));
         sb.append("--------------------------------------------------\n\n");
 
         double totalPeriodHours = 0;

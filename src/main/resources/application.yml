@@ -10,6 +10,12 @@ se:
     query-port: 27021
     log-file-path: "/app/logs/activity_log.txt"
 
+rust:
+  monitor:
+    server-ip: "80.242.59.104"
+    query-port: 35100
+    log-file-path: "/app/logs/rust-activity_log.txt"
+
 api:
   security:
     key: ${API_KEY}

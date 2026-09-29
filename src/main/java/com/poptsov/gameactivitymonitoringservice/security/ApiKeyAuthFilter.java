@@ -21,7 +21,6 @@ public class ApiKeyAuthFilter implements Filter {
         HttpServletRequest req = (HttpServletRequest) request;
         HttpServletResponse res = (HttpServletResponse) response;
 
-        // Пропускаем OPTIONS запросы (для CORS, если понадобится)
         if ("OPTIONS".equalsIgnoreCase(req.getMethod())) {
             chain.doFilter(request, response);
             return;
@@ -29,7 +28,7 @@ public class ApiKeyAuthFilter implements Filter {
 
         String providedKey = req.getHeader("X-API-KEY");
 
-        if (expectedApiKey.equals(providedKey)) {
+        if (expectedApiKey != null && expectedApiKey.equals(providedKey)) {
             chain.doFilter(request, response);
         } else {
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

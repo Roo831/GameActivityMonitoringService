@@ -3,9 +3,7 @@ package com.poptsov.gameactivitymonitoringservice.core;
 import com.github.koraktor.steamcondenser.steam.SteamPlayer;
 import com.github.koraktor.steamcondenser.steam.servers.SourceServer;
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -16,25 +14,33 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
-@Component
 public class PlayerActivityTracker {
 
-    @Value("${se.monitor.server-ip}")
-    private String serverIp;
-
-    @Value("${se.monitor.query-port}")
-    private int queryPort;
-
-    @Value("${se.monitor.log-file-path}")
-    private String logFileName;
+    private final String gameName;
+    private final String serverIp;
+    private final int queryPort;
+    private final String logFilePath;
 
     private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private final Set<String> lastOnlinePlayers = new HashSet<>();
 
+    private final Set<String> lastOnlinePlayers = new HashSet<>();
     private boolean isFirstScan = true;
+
+    public PlayerActivityTracker(String gameName, String serverIp, int queryPort, String logFilePath) {
+        this.gameName = gameName;
+        this.serverIp = serverIp;
+        this.queryPort = queryPort;
+        this.logFilePath = logFilePath;
+    }
 
     @Scheduled(fixedDelay = 60000)
     public void trackOnline() {
+
+        if (serverIp == null || serverIp.trim().isEmpty()) {
+            System.err.println("[ERROR] [" + gameName + "] Ip field is clear.");
+            return;
+        }
+
         try {
             SourceServer server = new SourceServer(serverIp, queryPort);
             HashMap<String, SteamPlayer> playersMap = server.getPlayers();
@@ -52,7 +58,7 @@ public class PlayerActivityTracker {
             if (isFirstScan) {
                 lastOnlinePlayers.addAll(currentOnline);
                 isFirstScan = false;
-                System.out.println("[INFO] Monitoring successfully started.");
+                System.out.println("[INFO] [" + gameName + "] Monitoring successfully started.");
                 return;
             }
 
@@ -72,33 +78,29 @@ public class PlayerActivityTracker {
             lastOnlinePlayers.addAll(currentOnline);
 
         } catch (Exception e) {
-            System.err.println("[ERROR] Game server polling error: " + e.getMessage());
+            System.err.println("[ERROR] [" + gameName + "] Game server polling error: " + e.getMessage());
         }
     }
 
-
     @PreDestroy
     public void onShutdown() {
-        if (lastOnlinePlayers.isEmpty()) {
-            System.out.println("[INFO] Shutdown: No active players to disconnect.");
+        if (serverIp == null || serverIp.trim().isEmpty() || lastOnlinePlayers.isEmpty()) {
             return;
         }
 
         String shutdownTimestamp = LocalDateTime.now().format(formatter);
-        System.out.println("[INFO] Shutdown: Writing DISCONNECT for " + lastOnlinePlayers.size() + " active players...");
+        System.out.println("[INFO] Shutdown [" + gameName + "]: Writing DISCONNECT for " + lastOnlinePlayers.size() + " active players...");
 
         for (String player : lastOnlinePlayers) {
             writeLog(shutdownTimestamp, "DISCONNECT", player);
         }
-
-        System.out.println("[INFO] Shutdown: All active players disconnected successfully.");
     }
 
     private void writeLog(String timestamp, String action, String nickname) {
         String logLine = String.format("[%s] [%s] %s\n", timestamp, action, nickname);
-        System.out.print("[NEW EVENT] " + logLine);
+        System.out.print("[NEW EVENT " + gameName + "] " + logLine);
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFileName, true))) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true))) {
             writer.write(logLine);
         } catch (IOException e) {
             System.err.println("[ERROR] Failed to write the log to the file: " + e.getMessage());
