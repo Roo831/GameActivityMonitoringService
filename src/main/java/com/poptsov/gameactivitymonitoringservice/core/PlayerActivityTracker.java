@@ -2,6 +2,7 @@ package com.poptsov.gameactivitymonitoringservice.core;
 
 import com.github.koraktor.steamcondenser.steam.SteamPlayer;
 import com.github.koraktor.steamcondenser.steam.servers.SourceServer;
+import com.poptsov.gameactivitymonitoringservice.service.AnalyticsService;
 import jakarta.annotation.PreDestroy;
 import org.springframework.scheduling.annotation.Scheduled;
 
@@ -20,16 +21,18 @@ public class PlayerActivityTracker {
     private final String serverIp;
     private final int queryPort;
     private final String logFilePath;
+    private final AnalyticsService analyticsService;
 
     private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final Set<String> lastOnlinePlayers = new HashSet<>();
 
-    public PlayerActivityTracker(String gameName, String serverIp, int queryPort, String logFilePath) {
+    public PlayerActivityTracker(String gameName, String serverIp, int queryPort, String logFilePath, AnalyticsService analyticsService) {
         this.gameName = gameName;
         this.serverIp = serverIp;
         this.queryPort = queryPort;
         this.logFilePath = logFilePath;
+        this.analyticsService = analyticsService;
     }
 
     @Scheduled(fixedDelay = 60000)

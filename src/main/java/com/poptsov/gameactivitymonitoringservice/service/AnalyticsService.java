@@ -11,8 +11,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class AnalyticsService {
 
@@ -23,8 +25,34 @@ public class AnalyticsService {
     // Группа 1: время, Группа 2: действие, Группа 3: никнейм (всё, что после действия, включая пробелы и скобки)
     private static final Pattern LOG_PATTERN = Pattern.compile("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] \\[(CONNECT|DISCONNECT)\\]\\s+(.+)$");
 
+    private final Map<String, Boolean> watchlist = new ConcurrentHashMap<>();
+
     public AnalyticsService(String logFileName) {
         this.logFileName = logFileName;
+    }
+
+    public void addToWatchlist(String nickname) {
+        watchlist.put(nickname.toLowerCase().trim(), false);
+    }
+
+    public void updateWatchlistStatus(Set<String> currentOnline) {
+        for (String onlinePlayer : currentOnline) {
+            String lowerName = onlinePlayer.toLowerCase();
+            if (watchlist.containsKey(lowerName)) {
+                watchlist.put(lowerName, true);
+            }
+        }
+    }
+
+    public List<String> getAndResetPendingNotifications() {
+        List<String> pending = new ArrayList<>();
+        for (Map.Entry<String, Boolean> entry : watchlist.entrySet()) {
+            if (entry.getValue()) {
+                pending.add(entry.getKey());
+                watchlist.put(entry.getKey(), false); // Сбрасываем флаг после выдачи
+            }
+        }
+        return pending;
     }
 
     public String getPlayerReport(String nickname, int days) {

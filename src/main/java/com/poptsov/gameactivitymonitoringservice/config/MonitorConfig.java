@@ -2,6 +2,7 @@ package com.poptsov.gameactivitymonitoringservice.config;
 
 import com.poptsov.gameactivitymonitoringservice.core.PlayerActivityTracker;
 import com.poptsov.gameactivitymonitoringservice.service.AnalyticsService;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,16 +14,18 @@ public class MonitorConfig {
     public PlayerActivityTracker seTracker(
             @Value("${se.monitor.server-ip}") String ip,
             @Value("${se.monitor.query-port}") int port,
+            @Qualifier("seAnalyticService") AnalyticsService analyticService,
             @Value("${se.monitor.log-file-path}") String logPath) {
-        return new PlayerActivityTracker("SpaceEngineers", ip, port, logPath);
+        return new PlayerActivityTracker("SpaceEngineers", ip, port, logPath, analyticService);
     }
 
     @Bean
     public PlayerActivityTracker rustTracker(
             @Value("${rust.monitor.server-ip}") String ip,
             @Value("${rust.monitor.query-port}") int port,
+            @Qualifier("seAnalyticService") AnalyticsService rustAnalyticService,
             @Value("${rust.monitor.log-file-path}") String logPath) {
-        return new PlayerActivityTracker("RUST", ip, port, logPath);
+        return new PlayerActivityTracker("RUST", ip, port, logPath, rustAnalyticService);
     }
 
     @Bean
