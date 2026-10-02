@@ -36,12 +36,12 @@ public class AnalyticsService {
         LocalDateTime thresholdDate = now.minusDays(days);
 
         Map<LocalDate, List<GameSessionInterval>> dailySessions = new LinkedHashMap<>();
-        Map<Integer, Integer> globalHourlyStats = new HashMap<>();
+        Map<Integer, Long> globalHourlyStats = new HashMap<>();
 
         try (BufferedReader reader = new BufferedReader(new FileReader(logFileName))) {
             String line;
             LocalDateTime loginTime = null;
-            String targetNickname = nickname.trim().toLowerCase(); // Для регистронезависимого сравнения
+            String targetNickname = nickname.trim().toLowerCase();
 
             while ((line = reader.readLine()) != null) {
                 String trimmed = line.trim();
@@ -49,7 +49,7 @@ public class AnalyticsService {
 
                 Matcher matcher = LOG_PATTERN.matcher(trimmed);
                 if (!matcher.matches()) {
-                    continue; // Строка не соответствует ожидаемому формату, безопасно пропускаем
+                    continue;
                 }
 
                 String timeStr = matcher.group(1);
@@ -152,12 +152,20 @@ public class AnalyticsService {
         dailySessions.get(date).add(new GameSessionInterval(login, logout));
     }
 
-    private void calculateHourlyActivity(Map<Integer, Integer> stats, LocalDateTime login, LocalDateTime logout) {
-        LocalDateTime temp = login.withMinute(0).withSecond(0);
-        while (temp.isBefore(logout)) {
-            int hour = temp.getHour();
-            stats.put(hour, stats.getOrDefault(hour, 0) + 1);
-            temp = temp.plusHours(1);
+    private void calculateHourlyActivity(Map<Integer, Long> stats, LocalDateTime login, LocalDateTime logout) {
+        LocalDateTime current = login;
+
+        while (current.isBefore(logout)) {
+            LocalDateTime hourEnd = current.withMinute(0).withSecond(0).withNano(0).plusHours(1);
+
+            LocalDateTime effectiveEnd = logout.isBefore(hourEnd) ? logout : hourEnd;
+
+            long minutesInHour = Duration.between(current, effectiveEnd).toMinutes();
+
+            int hour = current.getHour();
+            stats.put(hour, stats.getOrDefault(hour, 0L) + minutesInHour);
+
+            current = hourEnd;
         }
     }
 
@@ -205,7 +213,7 @@ public class AnalyticsService {
 
     private String buildMilitaryReport(String nickname, int days,
                                        Map<LocalDate, List<GameSessionInterval>> dailySessions,
-                                       Map<Integer, Integer> globalHourlyStats) {
+                                       Map<Integer, Long> globalHourlyStats) {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("**TARGET ACTIVITY SUMMARY: %s** (Period: %d days)\n", nickname.toUpperCase(), days));
         sb.append("--------------------------------------------------\n\n");
