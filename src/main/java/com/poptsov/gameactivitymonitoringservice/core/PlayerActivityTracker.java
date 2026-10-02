@@ -42,8 +42,14 @@ public class PlayerActivityTracker {
         }
 
         try {
+            System.out.println("[DEBUG] [" + gameName + "] Connecting to " + serverIp + ":" + queryPort);
+
             SourceServer server = new SourceServer(serverIp, queryPort);
+
+            System.out.println("[DEBUG] [" + gameName + "] Requesting players...");
             HashMap<String, SteamPlayer> playersMap = server.getPlayers();
+
+            System.out.println("[DEBUG] [" + gameName + "] Received " + playersMap.size() + " players");
 
             Set<String> currentOnline = new HashSet<>();
             for (SteamPlayer player : playersMap.values()) {
@@ -54,7 +60,6 @@ public class PlayerActivityTracker {
             }
 
             String currentTimestamp = LocalDateTime.now().format(formatter);
-
 
             for (String player : currentOnline) {
                 if (!lastOnlinePlayers.contains(player)) {
@@ -74,6 +79,7 @@ public class PlayerActivityTracker {
         } catch (Exception e) {
             System.err.println("[ERROR] [" + gameName + "] Game server polling error: " +
                     e.getClass().getSimpleName() + " - " + e.getMessage());
+            e.printStackTrace(System.err); // <-- ПОЛНЫЙ STACK TRACE
         }
     }
 
@@ -98,7 +104,7 @@ public class PlayerActivityTracker {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true))) {
             writer.write(logLine);
         } catch (IOException e) {
-            System.err.println("[ERROR] Failed to write the log to the file: " + e.getMessage());
+            System.err.println("[ERROR] [" + gameName + "] Failed to write the log to the file: " + e.getMessage());
         }
     }
 }
