@@ -1,7 +1,5 @@
 package com.poptsov.gameactivitymonitoringservice.core;
 
-import com.github.koraktor.steamcondenser.steam.SteamPlayer;
-import com.github.koraktor.steamcondenser.steam.servers.SourceServer;
 import com.poptsov.gameactivitymonitoringservice.service.AnalyticsService;
 import jakarta.annotation.PreDestroy;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -11,7 +9,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -44,20 +41,8 @@ public class PlayerActivityTracker {
         try {
             System.out.println("[DEBUG] [" + gameName + "] Connecting to " + serverIp + ":" + queryPort);
 
-            SourceServer server = new SourceServer(serverIp, queryPort);
-
-            System.out.println("[DEBUG] [" + gameName + "] Requesting players...");
-            HashMap<String, SteamPlayer> playersMap = server.getPlayers();
-
-            System.out.println("[DEBUG] [" + gameName + "] Received " + playersMap.size() + " players");
-
-            Set<String> currentOnline = new HashSet<>();
-            for (SteamPlayer player : playersMap.values()) {
-                String nickname = player.getName();
-                if (nickname != null && !nickname.trim().isEmpty()) {
-                    currentOnline.add(nickname.trim());
-                }
-            }
+            SourceServerQuery query = new SourceServerQuery(serverIp, queryPort, 5000);
+            Set<String> currentOnline = query.getPlayers();
 
             String currentTimestamp = LocalDateTime.now().format(formatter);
 
