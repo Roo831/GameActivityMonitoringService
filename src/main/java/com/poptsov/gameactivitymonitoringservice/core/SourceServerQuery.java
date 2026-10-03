@@ -15,11 +15,13 @@ public class SourceServerQuery {
     private final String host;
     private final int port;
     private final int timeoutMs;
+    private final float minDurationSeconds; // Минимальное время на сервере (фильтр ботов)
 
-    public SourceServerQuery(String host, int port, int timeoutMs) {
+    public SourceServerQuery(String host, int port, int timeoutMs, float minDurationSeconds) {
         this.host = host;
         this.port = port;
         this.timeoutMs = timeoutMs;
+        this.minDurationSeconds = minDurationSeconds;
     }
 
     public Set<String> getPlayers() throws Exception {
@@ -76,26 +78,29 @@ public class SourceServerQuery {
         bb.getInt(); // FF FF FF FF
         bb.get();    // 'D' (0x44)
 
-        // КЛЮЧЕВОЕ: читаем как UNSIGNED byte
         int playerCount = bb.get() & 0xFF;
-        System.out.println("[DEBUG] Server reports " + playerCount + " player entries");
+        int filteredOut = 0;
 
         for (int i = 0; i < playerCount && bb.hasRemaining(); i++) {
             bb.get(); // index
             String name = readNullTerminatedString(bb);
 
-            if (name != null && !name.trim().isEmpty()) {
-                players.add(name.trim()); // Set автоматически фильтрует дубликаты
-            }
+            bb.getInt();
 
-            // Пропускаем score (4 bytes) + duration (4 bytes)
-            if (bb.remaining() >= 8) {
-                bb.getInt();   // score
-                bb.getFloat(); // duration
+            float duration = bb.getFloat();
+
+            // ФИЛЬТРАЦИЯ: пропускаем ботов с малым duration
+            if (name != null && !name.trim().isEmpty() && duration >= minDurationSeconds) {
+                players.add(name.trim());
+            } else {
+                filteredOut++;
             }
         }
 
-        System.out.println("[DEBUG] Unique players after filtering: " + players.size());
+        System.out.println("[DEBUG] Server reports " + playerCount + " player entries");
+        System.out.println("[DEBUG] Filtered out " + filteredOut + " bots (duration < " + minDurationSeconds + "s)");
+        System.out.println("[DEBUG] Real players after filtering: " + players.size());
+
         return players;
     }
 

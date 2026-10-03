@@ -41,7 +41,7 @@ public class PlayerActivityTracker {
         try {
             System.out.println("[DEBUG] [" + gameName + "] Connecting to " + serverIp + ":" + queryPort);
 
-            SourceServerQuery query = new SourceServerQuery(serverIp, queryPort, 5000);
+            SourceServerQuery query = new SourceServerQuery(serverIp, queryPort, 5000, 60.0f);
             Set<String> currentOnline = query.getPlayers();
 
             String currentTimestamp = LocalDateTime.now().format(formatter);
@@ -64,7 +64,7 @@ public class PlayerActivityTracker {
         } catch (Exception e) {
             System.err.println("[ERROR] [" + gameName + "] Game server polling error: " +
                     e.getClass().getSimpleName() + " - " + e.getMessage());
-            e.printStackTrace(System.err); // <-- ПОЛНЫЙ STACK TRACE
+            e.printStackTrace(System.err);
         }
     }
 
