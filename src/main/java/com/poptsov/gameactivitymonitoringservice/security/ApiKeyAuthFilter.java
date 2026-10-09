@@ -32,7 +32,9 @@ public class ApiKeyAuthFilter implements Filter {
             chain.doFilter(request, response);
         } else {
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            res.getWriter().write("Unauthorized: Invalid or missing API Key");
+            res.setContentType("application/json");
+            res.setCharacterEncoding("UTF-8");
+            res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Invalid or missing API key.\"}");
         }
     }
 }
