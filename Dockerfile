@@ -2,7 +2,7 @@
 FROM eclipse-temurin:21-jdk-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN ./gradlew clean bootJar --no-daemon
+RUN sh ./gradlew clean bootJar --no-daemon
 
 # ЭТАП 2: Финальный образ (только JRE, без JDK)
 FROM eclipse-temurin:21-jre-alpine
