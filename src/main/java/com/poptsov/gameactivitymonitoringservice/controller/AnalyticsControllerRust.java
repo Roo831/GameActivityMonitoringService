@@ -4,6 +4,8 @@ import com.poptsov.gameactivitymonitoringservice.service.AnalyticsService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.poptsov.gameactivitymonitoringservice.model.*;
+import java.util.Map;
 
 import java.util.List;
 
@@ -19,16 +21,16 @@ public class AnalyticsControllerRust {
     }
 
     @GetMapping("/stats")
-    public ResponseEntity<String> getStats(
+    public ResponseEntity<PlayerActivityReport> getStats(
             @RequestParam String nickname,
             @RequestParam(defaultValue = "7") int days) {
         return ResponseEntity.ok(rustAnalyticsService.getPlayerReport(nickname, days));
     }
 
     @PostMapping("/watchlist")
-    public ResponseEntity<String> addToWatchlist(@RequestParam String nickname) {
+    public ResponseEntity<Map<String, Object>> addToWatchlist(@RequestParam String nickname) {
         rustAnalyticsService.addToWatchlist(nickname);
-        return ResponseEntity.ok("Игрок " + nickname + " добавлен в список слежения.");
+        return ResponseEntity.ok(Map.of("nickname", nickname.trim(), "watching", true));
     }
 
     @GetMapping("/watchlist/pending")
@@ -38,14 +40,14 @@ public class AnalyticsControllerRust {
     }
 
     @GetMapping("/raw")
-    public ResponseEntity<String> getRawData(
+    public ResponseEntity<RawDataReport> getRawData(
             @RequestParam String nickname,
             @RequestParam(defaultValue = "3") int days) {
         return ResponseEntity.ok(rustAnalyticsService.getRawDataReport(nickname, days));
     }
 
     @GetMapping("/nicknames")
-    public ResponseEntity<String> getAllNicknames(
+    public ResponseEntity<NicknameReport> getAllNicknames(
             @RequestParam(defaultValue = "7") int days) {
         return ResponseEntity.ok(rustAnalyticsService.buildListOfAllNames(days));
     }

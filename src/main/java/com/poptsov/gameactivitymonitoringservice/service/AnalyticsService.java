@@ -1,298 +1,177 @@
 package com.poptsov.gameactivitymonitoringservice.service;
 
+import com.poptsov.gameactivitymonitoringservice.model.NicknameReport;
+import com.poptsov.gameactivitymonitoringservice.model.PlayerActivityReport;
+import com.poptsov.gameactivitymonitoringservice.model.PlayerActivityReport.DayActivity;
+import com.poptsov.gameactivitymonitoringservice.model.PlayerActivityReport.Session;
+import com.poptsov.gameactivitymonitoringservice.model.RawDataReport;
+import com.poptsov.gameactivitymonitoringservice.model.RawDataReport.ActivityEvent;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.nio.file.Path;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class AnalyticsService {
-
-    private final String logFileName;
-
-    private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-    // Группа 1: время, Группа 2: действие, Группа 3: никнейм (всё, что после действия, включая пробелы и скобки)
+    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Pattern LOG_PATTERN = Pattern.compile("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] \\[(CONNECT|DISCONNECT)\\]\\s+(.+)$");
-
+    private final Path logFile;
+    private final Clock clock;
     private final Map<String, Boolean> watchlist = new ConcurrentHashMap<>();
 
     public AnalyticsService(String logFileName) {
-        this.logFileName = logFileName;
+        this(logFileName, Clock.systemDefaultZone());
+    }
+
+    public AnalyticsService(String logFileName, Clock clock) {
+        this.logFile = Path.of(logFileName);
+        this.clock = clock;
     }
 
     public void addToWatchlist(String nickname) {
-        watchlist.put(nickname.toLowerCase().trim(), false);
+        watchlist.put(validNickname(nickname).toLowerCase(Locale.ROOT), false);
     }
 
     public void updateWatchlistStatus(Set<String> currentOnline) {
-        for (String onlinePlayer : currentOnline) {
-            String lowerName = onlinePlayer.toLowerCase();
-            if (watchlist.containsKey(lowerName)) {
-                watchlist.put(lowerName, true);
-            }
+        for (String player : currentOnline) {
+            String name = player.toLowerCase(Locale.ROOT);
+            if (watchlist.containsKey(name)) watchlist.put(name, true);
         }
     }
 
     public List<String> getAndResetPendingNotifications() {
         List<String> pending = new ArrayList<>();
-        for (Map.Entry<String, Boolean> entry : watchlist.entrySet()) {
+        for (var entry : watchlist.entrySet()) {
             if (entry.getValue()) {
                 pending.add(entry.getKey());
-                watchlist.put(entry.getKey(), false); // Сбрасываем флаг после выдачи
+                watchlist.put(entry.getKey(), false);
             }
         }
         return pending;
     }
 
-    public String getPlayerReport(String nickname, int days) {
-        if (!Files.exists(Paths.get(logFileName))) {
-            return "Statistics file is missing.";
-        }
+    public PlayerActivityReport getPlayerReport(String nickname, int days) {
+        nickname = validNickname(nickname);
+        validDays(days);
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime threshold = now.minusDays(days);
+        Map<LocalDate, List<Session>> daily = new TreeMap<>();
+        long[] hourly = new long[24];
+        LocalDateTime login = null;
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime thresholdDate = now.minusDays(days);
-
-        Map<LocalDate, List<GameSessionInterval>> dailySessions = new LinkedHashMap<>();
-        Map<Integer, Long> globalHourlyStats = new HashMap<>();
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(logFileName))) {
-            String line;
-            LocalDateTime loginTime = null;
-            String targetNickname = nickname.trim().toLowerCase();
-
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) continue;
-
-                Matcher matcher = LOG_PATTERN.matcher(trimmed);
-                if (!matcher.matches()) {
-                    continue;
-                }
-
-                String timeStr = matcher.group(1);
-                String action = matcher.group(2);
-                String parsedNickname = matcher.group(3).trim();
-
-                // Сравниваем без учета регистра
-                if (!parsedNickname.toLowerCase().equals(targetNickname)) {
-                    continue;
-                }
-
-                LocalDateTime eventTime = LocalDateTime.parse(timeStr, formatter);
-                if (eventTime.isBefore(thresholdDate)) continue;
-
-                if (action.equals("CONNECT")) {
-                    loginTime = eventTime;
-                } else if (action.equals("DISCONNECT")) {
-                    if (loginTime != null) {
-                        addSession(dailySessions, loginTime, eventTime);
-                        calculateHourlyActivity(globalHourlyStats, loginTime, eventTime);
-                        loginTime = null;
-                    }
+        try (Stream<ActivityEvent> events = readEvents()) {
+            Iterator<ActivityEvent> iterator = events.iterator();
+            while (iterator.hasNext()) {
+                ActivityEvent event = iterator.next();
+                if (!event.nickname().equalsIgnoreCase(nickname) || event.timestamp().isAfter(now)) continue;
+                if (event.action().equals("CONNECT")) {
+                    login = event.timestamp();
+                } else if (login != null) {
+                    addSession(daily, hourly, login, event.timestamp(), threshold, false);
+                    login = null;
                 }
             }
-
-            // Если в самом конце файла игрок остался в сети
-            if (loginTime != null) {
-                addSession(dailySessions, loginTime, now);
-                calculateHourlyActivity(globalHourlyStats, loginTime, now);
-            }
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            return "I/O error while reading logs: " + e.getMessage();
         }
+        if (login != null) addSession(daily, hourly, login, now, threshold, true);
 
-        if (dailySessions.isEmpty()) {
-            return String.format("Player %s has not been online for the last %d days.", nickname, days);
+        List<DayActivity> activity = daily.entrySet().stream()
+                .map(entry -> new DayActivity(entry.getKey(), entry.getValue().stream()
+                        .mapToLong(Session::durationSeconds).sum(), List.copyOf(entry.getValue())))
+                .toList();
+        Integer peak = null;
+        for (int hour = 0; hour < 24; hour++) {
+            if (hourly[hour] > 0 && (peak == null || hourly[hour] > hourly[peak])) peak = hour;
         }
-
-        return buildMilitaryReport(nickname, days, dailySessions, globalHourlyStats);
+        return new PlayerActivityReport(nickname, days, threshold, now, clock.getZone().getId(),
+                activity.stream().mapToLong(DayActivity::totalSeconds).sum(), peak, activity);
     }
 
-    public String getRawDataReport(String nickname, int days) {
-        if (!Files.exists(Paths.get(logFileName))) {
-            return "Statistics file is missing.";
-        }
-
-        LocalDateTime thresholdDate = LocalDateTime.now().minusDays(days);
-        StringBuilder sb = new StringBuilder();
-
-        sb.append(String.format("**RAW LOGS TARGET: %s** (Last %d days))\n", nickname.toUpperCase(), days));
-        sb.append("--------------------------------------------------\n```text\n");
-
-        int linesCount = 0;
-        String targetNickname = nickname.trim().toLowerCase();
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(logFileName))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) continue;
-
-                Matcher matcher = LOG_PATTERN.matcher(trimmed);
-                if (!matcher.matches()) continue;
-
-                String timeStr = matcher.group(1);
-                String parsedNickname = matcher.group(3).trim();
-
-                if (!parsedNickname.toLowerCase().equals(targetNickname)) continue;
-
-                LocalDateTime eventTime = LocalDateTime.parse(timeStr, formatter);
-                if (eventTime.isBefore(thresholdDate)) continue;
-
-                sb.append(line).append("\n");
-                linesCount++;
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            return "Input/Output error while reading raw logs: " + e.getMessage();
-        }
-
-        sb.append("```");
-
-        if (linesCount == 0) {
-            return String.format("No records found for player %s for %d days.", nickname, days);
-        }
-
-        // Защита от превышения лимита Discord (2000 символов)
-        if (sb.length() > 1950) {
-            return sb.substring(0, 1900) + "\n...[LOG TRUNCATED: DISCORD LIMIT EXCEEDED]```";
-        }
-
-        return sb.toString();
-    }
-
-    private void addSession(Map<LocalDate, List<GameSessionInterval>> dailySessions, LocalDateTime login, LocalDateTime logout) {
-        LocalDate date = login.toLocalDate();
-        dailySessions.putIfAbsent(date, new ArrayList<>());
-        dailySessions.get(date).add(new GameSessionInterval(login, logout));
-    }
-
-    private void calculateHourlyActivity(Map<Integer, Long> stats, LocalDateTime login, LocalDateTime logout) {
-        LocalDateTime current = login;
-
-        while (current.isBefore(logout)) {
-            LocalDateTime hourEnd = current.withMinute(0).withSecond(0).withNano(0).plusHours(1);
-
-            LocalDateTime effectiveEnd = logout.isBefore(hourEnd) ? logout : hourEnd;
-
-            long minutesInHour = Duration.between(current, effectiveEnd).toMinutes();
-
-            int hour = current.getHour();
-            stats.put(hour, stats.getOrDefault(hour, 0L) + minutesInHour);
-
-            current = hourEnd;
+    public RawDataReport getRawDataReport(String nickname, int days) {
+        nickname = validNickname(nickname);
+        validDays(days);
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime threshold = now.minusDays(days);
+        String target = nickname;
+        try (Stream<ActivityEvent> events = readEvents()) {
+            return new RawDataReport(nickname, days, threshold, now, clock.getZone().getId(), events
+                    .filter(event -> event.nickname().equalsIgnoreCase(target))
+                    .filter(event -> !event.timestamp().isBefore(threshold) && !event.timestamp().isAfter(now))
+                    .toList());
         }
     }
 
-    public String buildListOfAllNames(int days) {
-        StringBuilder sb = new StringBuilder();
-        LocalDateTime thresholdDate = LocalDateTime.now().minusDays(days);
-        sb.append(String.format("**All nicknames of active players over the last %d days:**\n", days));
-        sb.append("--------------------------------------------------\n\n");
-
-        // TreeSet с игнорированием регистра для уникальности и красивого алфавитного порядка
+    public NicknameReport buildListOfAllNames(int days) {
+        validDays(days);
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime threshold = now.minusDays(days);
         Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, String> online = new HashMap<>();
+        try (Stream<ActivityEvent> events = readEvents()) {
+            events.filter(event -> !event.timestamp().isAfter(now)).forEach(event -> {
+                if (!event.timestamp().isBefore(threshold)) names.add(event.nickname());
+                String key = event.nickname().toLowerCase(Locale.ROOT);
+                if (event.action().equals("CONNECT")) online.put(key, event.nickname());
+                else online.remove(key);
+            });
+        }
+        names.addAll(online.values());
+        return new NicknameReport(days, threshold, now, clock.getZone().getId(), List.copyOf(names));
+    }
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(logFileName))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) continue;
-
-                Matcher matcher = LOG_PATTERN.matcher(trimmed);
-                if (matcher.matches()) {
-                    String timeStr = matcher.group(1);
-                    LocalDateTime eventTime = LocalDateTime.parse(timeStr, formatter);
-
-                    if (eventTime.isAfter(thresholdDate)) {
-                        String parsedNickname = matcher.group(3).trim();
-                        names.add(parsedNickname);
-                    }
-                }
+    private void addSession(Map<LocalDate, List<Session>> daily, long[] hourly,
+                            LocalDateTime login, LocalDateTime logout, LocalDateTime threshold, boolean ongoing) {
+        LocalDateTime start = login.isBefore(threshold) ? threshold : login;
+        while (start.isBefore(logout)) {
+            LocalDateTime midnight = start.toLocalDate().plusDays(1).atStartOfDay();
+            LocalDateTime end = logout.isBefore(midnight) ? logout : midnight;
+            long seconds = Duration.between(start, end).getSeconds();
+            daily.computeIfAbsent(start.toLocalDate(), ignored -> new ArrayList<>())
+                    .add(new Session(start, end, seconds, ongoing && end.equals(logout)));
+            LocalDateTime hourStart = start;
+            while (hourStart.isBefore(end)) {
+                LocalDateTime nextHour = hourStart.withMinute(0).withSecond(0).withNano(0).plusHours(1);
+                LocalDateTime hourEnd = end.isBefore(nextHour) ? end : nextHour;
+                hourly[hourStart.getHour()] += Duration.between(hourStart, hourEnd).getSeconds();
+                hourStart = hourEnd;
             }
+            start = end;
+        }
+    }
+
+    private Stream<ActivityEvent> readEvents() {
+        if (Files.notExists(logFile)) return Stream.empty();
+        try {
+            return Files.lines(logFile).map(this::parseEvent).filter(Objects::nonNull);
         } catch (IOException e) {
-            e.printStackTrace();
-            return "I/O error while reading names: " + e.getMessage();
+            throw new UncheckedIOException(e);
         }
-
-        if (names.isEmpty()) {
-            return "No active players were found for this period.";
-        }
-
-        for (String name : names) {
-            sb.append("• ").append(name).append("\n");
-        }
-
-        return sb.toString().trim();
     }
 
-    private String buildMilitaryReport(String nickname, int days,
-                                       Map<LocalDate, List<GameSessionInterval>> dailySessions,
-                                       Map<Integer, Long> globalHourlyStats) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("**TARGET ACTIVITY SUMMARY: %s** (Period: %d days)\n", nickname.toUpperCase(), days));
-        sb.append("--------------------------------------------------\n\n");
-
-        double totalPeriodHours = 0;
-
-        sb.append("**DAY-BY-DAY CHRONOLOGY:**\n");
-        for (Map.Entry<LocalDate, List<GameSessionInterval>> entry : dailySessions.entrySet()) {
-            LocalDate date = entry.getKey();
-            List<GameSessionInterval> sessions = entry.getValue();
-
-            double dayHours = 0;
-            StringBuilder intervalsSb = new StringBuilder();
-
-            for (GameSessionInterval session : sessions) {
-                Duration d = Duration.between(session.login, session.logout);
-                dayHours += d.toMinutes() / 60.0;
-
-                intervalsSb.append(String.format("   • %02d:%02d — %02d:%02d\n",
-                        session.login.getHour(), session.login.getMinute(),
-                        session.logout.getHour(), session.logout.getMinute()));
-            }
-
-            totalPeriodHours += dayHours;
-            sb.append(String.format("• **%s** (Total time: %.1f h.)\n", date.toString(), dayHours));
-            sb.append(intervalsSb);
+    private ActivityEvent parseEvent(String line) {
+        var match = LOG_PATTERN.matcher(line.trim());
+        if (!match.matches()) return null;
+        try {
+            return new ActivityEvent(LocalDateTime.parse(match.group(1), FORMAT), match.group(2), match.group(3).trim());
+        } catch (DateTimeParseException e) {
+            return null;
         }
-
-        sb.append("\n**ANALYSIS OF ACTIVITY PERIODS:**\n");
-        sb.append(String.format("Total online time for the entire period: %.1f h.\n", totalPeriodHours));
-
-        if (!globalHourlyStats.isEmpty()) {
-            int peakHourStart = globalHourlyStats.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse(0);
-
-            sb.append(String.format("Hour of peak probability of presence: %02d:00 — %02d:00\n",
-                    peakHourStart, (peakHourStart + 1) % 24));
-        }
-
-        return sb.toString();
     }
 
-    private static class GameSessionInterval {
-        LocalDateTime login;
-        LocalDateTime logout;
-
-        GameSessionInterval(LocalDateTime login, LocalDateTime logout) {
-            this.login = login;
-            this.logout = logout;
+    private static String validNickname(String nickname) {
+        if (nickname == null || nickname.isBlank() || nickname.trim().length() > 128) {
+            throw new IllegalArgumentException("Nickname must contain 1 to 128 characters.");
         }
+        return nickname.trim();
+    }
+
+    private static void validDays(int days) {
+        if (days < 1 || days > 365) throw new IllegalArgumentException("Days must be between 1 and 365.");
     }
 }
