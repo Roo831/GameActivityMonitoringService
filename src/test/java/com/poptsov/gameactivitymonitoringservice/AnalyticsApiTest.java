@@ -33,6 +33,7 @@ class AnalyticsApiTest {
     static void logPaths(DynamicPropertyRegistry properties) {
         properties.add("se.monitor.log-file-path", () -> logs.resolve("engineers.txt").toString());
         properties.add("rust.monitor.log-file-path", () -> logs.resolve("rust.txt").toString());
+        properties.add("watchlist.state-file", () -> logs.resolve("watchlist.json").toString());
     }
 
     @BeforeEach
@@ -57,6 +58,10 @@ class AnalyticsApiTest {
             assertEquals(2, raw.get("events").size());
             assertEquals("CONNECT", raw.get("events").get(0).get("action").asString());
             assertEquals("Шкет", json(get(game + "/nicknames?days=7", "test-key"), 200).get("nicknames").get(0).asString());
+            var similar = json(get(game + "/similar?nickname=%D0%A8%D0%BA%D0%B5%D1%82&days=7", "test-key"), 200);
+            assertEquals("Шкет", similar.get("nickname").asString());
+            assertEquals(3600, similar.get("totalSeconds").asLong());
+            assertEquals(0, similar.get("players").size());
         }
     }
 
@@ -65,6 +70,8 @@ class AnalyticsApiTest {
         var error = json(get("rust/stats?nickname=Player&days=0", "test-key"), 400);
         assertEquals("INVALID_REQUEST", error.get("code").asString());
         assertNotNull(error.get("message"));
+        assertEquals("INVALID_REQUEST", json(get("engineers/similar?nickname=Player&days=366", "test-key"), 400)
+                .get("code").asString());
     }
 
     @Test

@@ -6,16 +6,18 @@ import com.poptsov.gameactivitymonitoringservice.model.PlayerActivityReport.DayA
 import com.poptsov.gameactivitymonitoringservice.model.PlayerActivityReport.Session;
 import com.poptsov.gameactivitymonitoringservice.model.RawDataReport;
 import com.poptsov.gameactivitymonitoringservice.model.RawDataReport.ActivityEvent;
+import com.poptsov.gameactivitymonitoringservice.model.SimilarActivityReport;
+import com.poptsov.gameactivitymonitoringservice.model.SimilarActivityReport.SimilarPlayer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -24,7 +26,6 @@ public class AnalyticsService {
     private static final Pattern LOG_PATTERN = Pattern.compile("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] \\[(CONNECT|DISCONNECT)\\]\\s+(.+)$");
     private final Path logFile;
     private final Clock clock;
-    private final Map<String, Boolean> watchlist = new ConcurrentHashMap<>();
 
     public AnalyticsService(String logFileName) {
         this(logFileName, Clock.systemDefaultZone());
@@ -33,28 +34,6 @@ public class AnalyticsService {
     public AnalyticsService(String logFileName, Clock clock) {
         this.logFile = Path.of(logFileName);
         this.clock = clock;
-    }
-
-    public void addToWatchlist(String nickname) {
-        watchlist.put(validNickname(nickname).toLowerCase(Locale.ROOT), false);
-    }
-
-    public void updateWatchlistStatus(Set<String> currentOnline) {
-        for (String player : currentOnline) {
-            String name = player.toLowerCase(Locale.ROOT);
-            if (watchlist.containsKey(name)) watchlist.put(name, true);
-        }
-    }
-
-    public List<String> getAndResetPendingNotifications() {
-        List<String> pending = new ArrayList<>();
-        for (var entry : watchlist.entrySet()) {
-            if (entry.getValue()) {
-                pending.add(entry.getKey());
-                watchlist.put(entry.getKey(), false);
-            }
-        }
-        return pending;
     }
 
     public PlayerActivityReport getPlayerReport(String nickname, int days) {
@@ -106,6 +85,116 @@ public class AnalyticsService {
                     .toList());
         }
     }
+
+    public SimilarActivityReport getSimilarActivityReport(String nickname, int days) {
+        nickname = validNickname(nickname);
+        validDays(days);
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime threshold = now.minusDays(days);
+        Map<String, PlayerTimeline> timelines = new HashMap<>();
+        try (Stream<ActivityEvent> events = readEvents()) {
+            events.filter(event -> !event.timestamp().isAfter(now)).forEach(event -> {
+                PlayerTimeline timeline = timelines.computeIfAbsent(nicknameKey(event.nickname()),
+                        ignored -> new PlayerTimeline(event.nickname()));
+                if (event.action().equals("CONNECT")) {
+                    if (timeline.login == null) timeline.login = event.timestamp();
+                } else if (timeline.login != null) {
+                    addInterval(timeline, event.timestamp(), threshold, now);
+                    timeline.login = null;
+                }
+            });
+        }
+        for (PlayerTimeline timeline : timelines.values()) {
+            if (timeline.login != null) addInterval(timeline, now, threshold, now);
+            timeline.intervals = mergeIntervals(timeline.intervals);
+        }
+
+        String targetKey = nicknameKey(nickname);
+        PlayerTimeline target = timelines.get(targetKey);
+        long totalSeconds = target == null ? 0 : totalSeconds(target.intervals);
+        List<SimilarPlayer> players = new ArrayList<>();
+        if (totalSeconds > 0) {
+            for (var entry : timelines.entrySet()) {
+                if (entry.getKey().equals(targetKey)) continue;
+                PlayerTimeline candidate = entry.getValue();
+                Overlap overlap = overlap(target.intervals, candidate.intervals);
+                if (overlap.seconds() == 0) continue;
+                long candidateSeconds = totalSeconds(candidate.intervals);
+                players.add(new SimilarPlayer(candidate.nickname, candidateSeconds, overlap.seconds(), overlap.sharedDays(),
+                        100.0 * overlap.seconds() / totalSeconds,
+                        100.0 * overlap.seconds() / candidateSeconds,
+                        100.0 * overlap.seconds() / (totalSeconds + candidateSeconds - overlap.seconds())));
+            }
+        }
+        players.sort(Comparator.comparingDouble(SimilarPlayer::similarityPercent).reversed()
+                .thenComparing(Comparator.comparingLong(SimilarPlayer::overlapSeconds).reversed())
+                .thenComparing(SimilarPlayer::nickname));
+        return new SimilarActivityReport(nickname, days, threshold, now, clock.getZone().getId(),
+                totalSeconds, List.copyOf(players));
+    }
+
+    private static String nicknameKey(String nickname) {
+        return Normalizer.normalize(nickname, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+    }
+
+    private static void addInterval(PlayerTimeline timeline, LocalDateTime logout,
+                                    LocalDateTime threshold, LocalDateTime now) {
+        LocalDateTime start = timeline.login.isBefore(threshold) ? threshold : timeline.login;
+        LocalDateTime end = logout.isAfter(now) ? now : logout;
+        if (start.isBefore(end)) timeline.intervals.add(new Interval(start, end));
+    }
+
+    private static List<Interval> mergeIntervals(List<Interval> intervals) {
+        intervals.sort(Comparator.comparing(Interval::start));
+        List<Interval> merged = new ArrayList<>();
+        for (Interval interval : intervals) {
+            if (merged.isEmpty() || interval.start().isAfter(merged.getLast().end())) {
+                merged.add(interval);
+            } else if (interval.end().isAfter(merged.getLast().end())) {
+                merged.set(merged.size() - 1, new Interval(merged.getLast().start(), interval.end()));
+            }
+        }
+        return merged;
+    }
+
+    private static long totalSeconds(List<Interval> intervals) {
+        return intervals.stream().mapToLong(interval -> Duration.between(interval.start(), interval.end()).getSeconds()).sum();
+    }
+
+    private static Overlap overlap(List<Interval> target, List<Interval> candidate) {
+        int targetIndex = 0;
+        int candidateIndex = 0;
+        long seconds = 0;
+        Set<LocalDate> dates = new HashSet<>();
+        while (targetIndex < target.size() && candidateIndex < candidate.size()) {
+            Interval left = target.get(targetIndex);
+            Interval right = candidate.get(candidateIndex);
+            LocalDateTime start = left.start().isAfter(right.start()) ? left.start() : right.start();
+            LocalDateTime end = left.end().isBefore(right.end()) ? left.end() : right.end();
+            if (start.isBefore(end)) {
+                seconds += Duration.between(start, end).getSeconds();
+                for (LocalDate date = start.toLocalDate(); date.atStartOfDay().isBefore(end); date = date.plusDays(1)) {
+                    dates.add(date);
+                }
+            }
+            if (!left.end().isAfter(right.end())) targetIndex++;
+            else candidateIndex++;
+        }
+        return new Overlap(seconds, dates.size());
+    }
+
+    private static class PlayerTimeline {
+        final String nickname;
+        LocalDateTime login;
+        List<Interval> intervals = new ArrayList<>();
+
+        PlayerTimeline(String nickname) {
+            this.nickname = nickname;
+        }
+    }
+
+    private record Interval(LocalDateTime start, LocalDateTime end) {}
+    private record Overlap(long seconds, int sharedDays) {}
 
     public NicknameReport buildListOfAllNames(int days) {
         validDays(days);

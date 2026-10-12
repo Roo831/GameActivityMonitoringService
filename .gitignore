@@ -34,6 +34,7 @@ out/
 /.nb-gradle/
 
 .env
+/server_logs/
 
 ### VS Code ###
 .vscode/

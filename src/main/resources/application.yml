@@ -4,6 +4,9 @@ spring:
 server:
   port: 8083
 
+watchlist:
+  state-file: "/app/logs/watchlist.json"
+
 se:
   monitor:
     server-ip: "5.9.118.202"
