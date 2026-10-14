@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   game-monitor-backend:
-    build: .
+    image: roo831/game-activity-monitoring-service:latest
+    pull_policy: always
     container_name: game-monitor-backend
     restart: always
     ports:

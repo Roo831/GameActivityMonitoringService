@@ -1,5 +1,4 @@
 .git
 .gradle
-build/
 .env
 server_logs/
