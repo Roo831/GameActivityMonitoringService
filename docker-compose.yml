@@ -15,5 +15,6 @@ services:
       - SE_MONITOR_QUERY_PORT=27021
       - SE_MONITOR_LOG_FILE_PATH=/app/logs/activity_log.txt
       - WATCHLIST_STATE_FILE=/app/logs/watchlist.json
+      - APPLICATION_LOG_FILE=/app/logs/game-monitoring.log
     volumes:
       - ./server_logs:/app/logs

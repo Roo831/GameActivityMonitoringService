@@ -8,31 +8,25 @@ import com.poptsov.gameactivitymonitoringservice.model.RawDataReport;
 import com.poptsov.gameactivitymonitoringservice.model.RawDataReport.ActivityEvent;
 import com.poptsov.gameactivitymonitoringservice.model.SimilarActivityReport;
 import com.poptsov.gameactivitymonitoringservice.model.SimilarActivityReport.SimilarPlayer;
+import com.poptsov.gameactivitymonitoringservice.repository.ActivityRepository;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.text.Normalizer;
 import java.time.*;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.*;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class AnalyticsService {
-    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final Pattern LOG_PATTERN = Pattern.compile("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] \\[(CONNECT|DISCONNECT)\\]\\s+(.+)$");
-    private final Path logFile;
+    // shortcut: co-presence is a teammate heuristic; verified identity/team data is needed for confirmed membership.
+    private static final long MIN_SHARED_SESSION_SECONDS = 15 * 60;
+    private final ActivityRepository activityRepository;
     private final Clock clock;
 
-    public AnalyticsService(String logFileName) {
-        this(logFileName, Clock.systemDefaultZone());
+    public AnalyticsService(ActivityRepository activityRepository) {
+        this(activityRepository, Clock.systemDefaultZone());
     }
 
-    public AnalyticsService(String logFileName, Clock clock) {
-        this.logFile = Path.of(logFileName);
+    public AnalyticsService(ActivityRepository activityRepository, Clock clock) {
+        this.activityRepository = activityRepository;
         this.clock = clock;
     }
 
@@ -118,15 +112,17 @@ public class AnalyticsService {
                 if (entry.getKey().equals(targetKey)) continue;
                 PlayerTimeline candidate = entry.getValue();
                 Overlap overlap = overlap(target.intervals, candidate.intervals);
-                if (overlap.seconds() == 0) continue;
+                if (overlap.sharedSessions() == 0) continue;
                 long candidateSeconds = totalSeconds(candidate.intervals);
+                double similarity = 100.0 * overlap.seconds() / (totalSeconds + candidateSeconds - overlap.seconds());
                 players.add(new SimilarPlayer(candidate.nickname, candidateSeconds, overlap.seconds(), overlap.sharedDays(),
                         100.0 * overlap.seconds() / totalSeconds,
                         100.0 * overlap.seconds() / candidateSeconds,
-                        100.0 * overlap.seconds() / (totalSeconds + candidateSeconds - overlap.seconds())));
+                        similarity, overlap.sharedSessions(), similarity * overlap.sharedSessions()));
             }
         }
-        players.sort(Comparator.comparingDouble(SimilarPlayer::similarityPercent).reversed()
+        players.sort(Comparator.comparingDouble(SimilarPlayer::rankingScore).reversed()
+                .thenComparing(Comparator.comparingDouble(SimilarPlayer::similarityPercent).reversed())
                 .thenComparing(Comparator.comparingLong(SimilarPlayer::overlapSeconds).reversed())
                 .thenComparing(SimilarPlayer::nickname));
         return new SimilarActivityReport(nickname, days, threshold, now, clock.getZone().getId(),
@@ -165,6 +161,7 @@ public class AnalyticsService {
         int targetIndex = 0;
         int candidateIndex = 0;
         long seconds = 0;
+        long[] sessionSeconds = new long[target.size()];
         Set<LocalDate> dates = new HashSet<>();
         while (targetIndex < target.size() && candidateIndex < candidate.size()) {
             Interval left = target.get(targetIndex);
@@ -172,7 +169,9 @@ public class AnalyticsService {
             LocalDateTime start = left.start().isAfter(right.start()) ? left.start() : right.start();
             LocalDateTime end = left.end().isBefore(right.end()) ? left.end() : right.end();
             if (start.isBefore(end)) {
-                seconds += Duration.between(start, end).getSeconds();
+                long sharedSeconds = Duration.between(start, end).getSeconds();
+                seconds += sharedSeconds;
+                sessionSeconds[targetIndex] += sharedSeconds;
                 for (LocalDate date = start.toLocalDate(); date.atStartOfDay().isBefore(end); date = date.plusDays(1)) {
                     dates.add(date);
                 }
@@ -180,7 +179,13 @@ public class AnalyticsService {
             if (!left.end().isAfter(right.end())) targetIndex++;
             else candidateIndex++;
         }
-        return new Overlap(seconds, dates.size());
+        int sharedSessions = 0;
+        for (int i = 0; i < sessionSeconds.length; i++) {
+            if (sessionSeconds[i] >= MIN_SHARED_SESSION_SECONDS) {
+                sharedSessions++;
+            }
+        }
+        return new Overlap(seconds, dates.size(), sharedSessions);
     }
 
     private static class PlayerTimeline {
@@ -194,7 +199,7 @@ public class AnalyticsService {
     }
 
     private record Interval(LocalDateTime start, LocalDateTime end) {}
-    private record Overlap(long seconds, int sharedDays) {}
+    private record Overlap(long seconds, int sharedDays, int sharedSessions) {}
 
     public NicknameReport buildListOfAllNames(int days) {
         validDays(days);
@@ -235,22 +240,7 @@ public class AnalyticsService {
     }
 
     private Stream<ActivityEvent> readEvents() {
-        if (Files.notExists(logFile)) return Stream.empty();
-        try {
-            return Files.lines(logFile).map(this::parseEvent).filter(Objects::nonNull);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private ActivityEvent parseEvent(String line) {
-        var match = LOG_PATTERN.matcher(line.trim());
-        if (!match.matches()) return null;
-        try {
-            return new ActivityEvent(LocalDateTime.parse(match.group(1), FORMAT), match.group(2), match.group(3).trim());
-        } catch (DateTimeParseException e) {
-            return null;
-        }
+        return activityRepository.findAll();
     }
 
     private static String validNickname(String nickname) {

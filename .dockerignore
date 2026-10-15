@@ -2,3 +2,4 @@
 .gradle
 .env
 server_logs/
+logs/

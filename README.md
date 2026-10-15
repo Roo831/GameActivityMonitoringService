@@ -14,7 +14,15 @@ $env:API_KEY = 'replace-with-a-secret'
 
 The service listens on port 8083. Server addresses, query ports and log paths are configured in `src/main/resources/application.yml` and can be overridden with Spring environment variables, for example `RUST_MONITOR_LOG_FILE_PATH` and `SE_MONITOR_LOG_FILE_PATH`. Set writable log paths and `WATCHLIST_STATE_FILE` when running outside Docker. An empty `RUST_MONITOR_SERVER_IP` / `SE_MONITOR_SERVER_IP` disables the corresponding poller, which is useful for local tests.
 
-The watchlist uses an ordinary JSON file, with no database or additional storage dependency. By default `/app/logs/watchlist.json` is persisted by the existing `./server_logs:/app/logs` Docker bind mount. Keep this directory when rebuilding or restarting containers. Run `docker compose up -d --build` to build the current sources; the jar in an old image does not update automatically. Runtime logs, state and environment secrets are excluded from the Docker build context.
+The watchlist uses an ordinary JSON file, with no database or additional storage dependency. By default `/app/logs/watchlist.json` is persisted by the existing `./server_logs:/app/logs` Docker bind mount. Keep this directory when rebuilding or restarting containers. The current Dockerfile packages a prebuilt JAR; build it first with `sh ./gradlew clean test bootJar` (or `gradlew.bat` on Windows). Compose uses the published `roo831/game-activity-monitoring-service` image; after publishing the updated image, run `docker compose pull` and `docker compose up -d`. Runtime logs, state and environment secrets are excluded from the Docker build context.
+
+## Storage and logging
+
+`ActivityRepository` is the activity persistence boundary (`findAll`, `saveAll`). `LogFileActivityRepository` is the active implementation and retains the existing UTF-8 `[timestamp] [CONNECT|DISCONNECT] nickname` journal. The tracker and analytics share one repository instance per game, selected in `MonitorConfig`. A later database implementation can replace this adapter without adding filesystem access to the business services. No database, JDBC driver, or migration is introduced.
+
+Journal batches create missing directories and validate every event before writing. Append failures are reported and the tracker keeps its previous committed presence, so the next successful poll retries missing transitions. Partial batch writes attempt to truncate back to the previous file size. Repository reads preserve existing logs and skip malformed rows, including impossible dates. Do not run multiple processes writing the same journal.
+
+Both application diagnostics and SLF4J library messages use Log4j 2 through Spring Boot's Log4j2 starter. Operational logs go to the console and a separate file: `APPLICATION_LOG_FILE` defaults to `./logs/game-monitoring.log`; Compose sets `/app/logs/game-monitoring.log` in the existing persisted volume. These messages never enter the activity journal. Standard `logging.level.*` settings control verbosity. Log4j versions are managed by the Spring Boot dependency platform.
 
 ## JSON API
 
@@ -80,7 +88,11 @@ The deployment supports one backend process and one bot instance per game. Multi
 
 ## Similar activity
 
-`/similar` returns `nickname`, `days`, `periodStart`, `periodEnd`, `timeZone`, `totalSeconds`, and `players`. Each player has `nickname`, `totalSeconds`, `overlapSeconds`, `sharedDays`, `targetOverlapPercent`, `playerOverlapPercent`, and `similarityPercent`. The last value is `overlap / (target total + player total - overlap) * 100`, a Jaccard percentage of recorded time. It is a co-presence heuristic, not a teammate probability or friendship claim. Results include all positive intersections, exclude the target, and sort by similarity descending, overlap descending, then nickname ascending. Clients paginate the results.
+`/similar` returns `nickname`, `days`, `periodStart`, `periodEnd`, `timeZone`, `totalSeconds`, and `players`. Each candidate has `nickname`, `totalSeconds`, `overlapSeconds`, `sharedDays`, `targetOverlapPercent`, `playerOverlapPercent`, `similarityPercent`, `sharedSessions`, and `rankingScore`. `similarityPercent` remains `overlap / (target total + player total - overlap) * 100`, a Jaccard percentage of recorded time.
+
+A meaningful shared session requires at least 15 minutes of total overlap within one merged, recorded target session. Candidate reconnects within that target session count once. Players without any such session are omitted; the target is always excluded. `rankingScore = similarityPercent * sharedSessions`, so repeated overlap matters without automatically promoting continuously online players. Sort by ranking score descending, Jaccard descending, overlap duration descending, then nickname ascending. Scores are points and can exceed 100; they are not probabilities. Durations and shared dates still include all overlap for an included candidate.
+
+Equal join/exit timestamps are not used as evidence: monitor startup/shutdown can create them for unrelated players. The result is a co-presence heuristic, not a confirmed teammate list or friendship claim. Missing historical disconnects remain uncertain; this change does not repair old logs or establish Steam identity. Clients paginate every included candidate.
 
 ## Coordinated upgrade
 

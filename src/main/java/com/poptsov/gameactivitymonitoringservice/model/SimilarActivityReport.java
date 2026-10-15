@@ -8,5 +8,5 @@ public record SimilarActivityReport(String nickname, int days, LocalDateTime per
                                     List<SimilarPlayer> players) {
     public record SimilarPlayer(String nickname, long totalSeconds, long overlapSeconds, int sharedDays,
                                 double targetOverlapPercent, double playerOverlapPercent,
-                                double similarityPercent) {}
+                                double similarityPercent, int sharedSessions, double rankingScore) {}
 }
