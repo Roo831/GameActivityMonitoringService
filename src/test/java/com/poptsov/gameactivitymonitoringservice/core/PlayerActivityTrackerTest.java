@@ -1,5 +1,6 @@
 package com.poptsov.gameactivitymonitoringservice.core;
 
+import com.poptsov.gameactivitymonitoringservice.repository.LogFileActivityRepository;
 import com.poptsov.gameactivitymonitoringservice.service.WatchlistService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,12 +21,28 @@ class PlayerActivityTrackerTest {
     @TempDir Path directory;
 
     @Test
+    void failedLogWriteIsRetriedOnTheNextSuccessfulPoll() throws Exception {
+        var store = mock(WatchlistService.class);
+        Path log = directory.resolve("rust.txt");
+        Files.createDirectory(log);
+        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, new LogFileActivityRepository(log), store);
+        try (var queries = mockConstruction(SourceServerQuery.class, (query, context) ->
+                when(query.getPlayers()).thenReturn(Set.of("Player")))) {
+            tracker.trackOnline();
+            Files.delete(log);
+            tracker.trackOnline();
+            assertTrue(Files.exists(log), "A failed journal append must not lose the connection event");
+            assertTrue(Files.readString(log).contains("[CONNECT] Player"));
+        }
+    }
+
+    @Test
     void unsuccessfulPollPreservesPresenceAndSuccessfulPollFulfillsOnlyMatchingGame() throws Exception {
         var store = new WatchlistService(directory.resolve("watchlist.json").toString(), Clock.systemUTC());
         store.register("rust", "Player", "100", "200");
         store.register("engineers", "Player", "100", "200");
         Path log = directory.resolve("rust.txt");
-        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, log.toString(), store);
+        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, new LogFileActivityRepository(log), store);
         try (var queries = mockConstruction(SourceServerQuery.class, (query, context) -> {
             switch (context.getCount()) {
                 case 1 -> when(query.getPlayers()).thenReturn(Set.of("Player"));
@@ -50,7 +67,7 @@ class PlayerActivityTrackerTest {
     void disabledPollerDoesNotPublishEmptyPresence() throws Exception {
         var store = new WatchlistService(directory.resolve("watchlist.json").toString(), Clock.systemUTC());
         store.successfulPoll("rust", Set.of("Player"));
-        var tracker = new PlayerActivityTracker("rust", "", 27015, directory.resolve("rust.txt").toString(), store);
+        var tracker = new PlayerActivityTracker("rust", "", 27015, new LogFileActivityRepository(directory.resolve("rust.txt")), store);
         tracker.trackOnline();
         assertTrue(store.register("rust", "Player", "100", "200").alreadyOnline());
         assertFalse(Files.exists(directory.resolve("rust.txt")));
@@ -61,7 +78,7 @@ class PlayerActivityTrackerTest {
     void caseOrUnicodeSpellingChangeKeepsSessionOpenUntilActualExit(String firstName, String nextName) throws Exception {
         var store = new WatchlistService(directory.resolve("watchlist.json").toString(), Clock.systemUTC());
         Path log = directory.resolve("rust.txt");
-        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, log.toString(), store);
+        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, new LogFileActivityRepository(log), store);
         try (var queries = mockConstruction(SourceServerQuery.class, (query, context) -> {
             when(query.getPlayers()).thenReturn(switch (context.getCount()) {
                 case 1 -> Set.of(firstName);
@@ -86,7 +103,7 @@ class PlayerActivityTrackerTest {
         doThrow(new WatchlistService.StorageException(new IOException("Unavailable")))
                 .when(store).successfulPoll(eq("rust"), anySet());
         Path log = directory.resolve("rust.txt");
-        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, log.toString(), store);
+        var tracker = new PlayerActivityTracker("rust", "127.0.0.1", 27015, new LogFileActivityRepository(log), store);
         try (var queries = mockConstruction(SourceServerQuery.class, (query, context) ->
                 when(query.getPlayers()).thenReturn(context.getCount() == 1 ? Set.of("Player") : Set.of()))) {
             tracker.trackOnline();

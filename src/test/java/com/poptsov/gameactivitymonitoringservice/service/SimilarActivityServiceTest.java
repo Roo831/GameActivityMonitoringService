@@ -1,5 +1,6 @@
 package com.poptsov.gameactivitymonitoringservice.service;
 
+import com.poptsov.gameactivitymonitoringservice.repository.LogFileActivityRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
@@ -23,7 +24,7 @@ class SimilarActivityServiceTest {
     private AnalyticsService service(String lines) throws Exception {
         Path log = directory.resolve("activity.txt");
         Files.writeString(log, lines);
-        return new AnalyticsService(log.toString(), clock);
+        return new AnalyticsService(new LogFileActivityRepository(log), clock);
     }
 
     private JsonNode report(AnalyticsService service, String nickname, int days) throws Exception {
@@ -201,7 +202,7 @@ class SimilarActivityServiceTest {
 
     @Test
     void returnsEmptyResultsForMissingLogsOrAnUnknownTarget() throws Exception {
-        var missing = new AnalyticsService(directory.resolve("missing.txt").toString(), clock);
+        var missing = new AnalyticsService(new LogFileActivityRepository(directory.resolve("missing.txt")), clock);
         var empty = report(missing, "Alice", 7);
         assertEquals(0, empty.get("totalSeconds").asLong());
         assertEquals(0, empty.get("players").size());

@@ -35,6 +35,7 @@ out/
 
 .env
 /server_logs/
+/logs/
 
 ### VS Code ###
 .vscode/

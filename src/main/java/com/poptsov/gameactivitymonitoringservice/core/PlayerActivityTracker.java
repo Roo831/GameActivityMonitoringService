@@ -1,14 +1,15 @@
 package com.poptsov.gameactivitymonitoringservice.core;
 
 import com.poptsov.gameactivitymonitoringservice.service.WatchlistService;
+import com.poptsov.gameactivitymonitoringservice.repository.ActivityRepository;
+import com.poptsov.gameactivitymonitoringservice.model.RawDataReport.ActivityEvent;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import jakarta.annotation.PreDestroy;
 import org.springframework.scheduling.annotation.Scheduled;
 
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.text.Normalizer;
 import java.util.HashMap;
 import java.util.Locale;
@@ -16,22 +17,21 @@ import java.util.Map;
 import java.util.Set;
 
 public class PlayerActivityTracker {
+    private static final Logger log = LogManager.getLogger(PlayerActivityTracker.class);
 
     private final String gameName;
     private final String serverIp;
     private final int queryPort;
-    private final String logFilePath;
+    private final ActivityRepository activityRepository;
     private final WatchlistService watchlistService;
-
-    private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final Map<String, String> lastOnlinePlayers = new HashMap<>();
 
-    public PlayerActivityTracker(String gameName, String serverIp, int queryPort, String logFilePath, WatchlistService watchlistService) {
+    public PlayerActivityTracker(String gameName, String serverIp, int queryPort, ActivityRepository activityRepository, WatchlistService watchlistService) {
         this.gameName = gameName;
         this.serverIp = serverIp;
         this.queryPort = queryPort;
-        this.logFilePath = logFilePath;
+        this.activityRepository = activityRepository;
         this.watchlistService = watchlistService;
     }
 
@@ -42,40 +42,42 @@ public class PlayerActivityTracker {
         }
 
         try {
-            System.out.println("[DEBUG] [" + gameName + "] Connecting to " + serverIp + ":" + queryPort);
+            log.debug("[{}] Polling {}:{}", gameName, serverIp, queryPort);
 
             SourceServerQuery query = new SourceServerQuery(serverIp, queryPort, 5000);
             Set<String> currentOnline = query.getPlayers();
             try {
                 watchlistService.successfulPoll(gameName, currentOnline);
             } catch (WatchlistService.StorageException error) {
-                System.err.println("[ERROR] [" + gameName + "] Watchlist update failed: " + error.getMessage());
+                log.error("[{}] Watchlist update failed", gameName, error);
             }
 
-            String currentTimestamp = LocalDateTime.now().format(formatter);
+            var currentTimestamp = LocalDateTime.now();
+            var events = new ArrayList<ActivityEvent>();
             Map<String, String> currentByName = new HashMap<>();
 
             for (String player : currentOnline) {
                 String normalizedName = Normalizer.normalize(player, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
                 if (!lastOnlinePlayers.containsKey(normalizedName) && !currentByName.containsKey(normalizedName)) {
-                    writeLog(currentTimestamp, "CONNECT", player);
+                    events.add(new ActivityEvent(currentTimestamp, "CONNECT", player));
                 }
                 currentByName.putIfAbsent(normalizedName, lastOnlinePlayers.getOrDefault(normalizedName, player));
             }
 
             for (var player : lastOnlinePlayers.entrySet()) {
                 if (!currentByName.containsKey(player.getKey())) {
-                    writeLog(currentTimestamp, "DISCONNECT", player.getValue());
+                    events.add(new ActivityEvent(currentTimestamp, "DISCONNECT", player.getValue()));
                 }
             }
 
+            activityRepository.saveAll(events);
+            // Keep the last committed presence until the journal accepts the batch, so writes can be retried.
             lastOnlinePlayers.clear();
             lastOnlinePlayers.putAll(currentByName);
+            for (var event : events) log.info("[{}] {} {}", gameName, event.action(), event.nickname());
 
         } catch (Exception e) {
-            System.err.println("[ERROR] [" + gameName + "] Game server polling error: " +
-                    e.getClass().getSimpleName() + " - " + e.getMessage());
-            e.printStackTrace(System.err);
+            log.error("[{}] Polling or activity persistence failed", gameName, e);
         }
     }
 
@@ -85,22 +87,14 @@ public class PlayerActivityTracker {
             return;
         }
 
-        String shutdownTimestamp = LocalDateTime.now().format(formatter);
-        System.out.println("[INFO] Shutdown [" + gameName + "]: Writing DISCONNECT for " + lastOnlinePlayers.size() + " active players...");
-
-        for (String player : lastOnlinePlayers.values()) {
-            writeLog(shutdownTimestamp, "DISCONNECT", player);
-        }
-    }
-
-    private void writeLog(String timestamp, String action, String nickname) {
-        String logLine = String.format("[%s] [%s] %s\n", timestamp, action, nickname);
-        System.out.print("[NEW EVENT " + gameName + "] " + logLine);
-
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true))) {
-            writer.write(logLine);
-        } catch (IOException e) {
-            System.err.println("[ERROR] [" + gameName + "] Failed to write the log to the file: " + e.getMessage());
+        var shutdownTimestamp = LocalDateTime.now();
+        try {
+            activityRepository.saveAll(lastOnlinePlayers.values().stream()
+                    .map(player -> new ActivityEvent(shutdownTimestamp, "DISCONNECT", player)).toList());
+            lastOnlinePlayers.clear();
+            log.info("[{}] Closed active sessions on shutdown", gameName);
+        } catch (Exception error) {
+            log.error("[{}] Could not persist shutdown sessions", gameName, error);
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.poptsov.gameactivitymonitoringservice.service;
 
+import com.poptsov.gameactivitymonitoringservice.repository.LogFileActivityRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.json.JsonMapper;
@@ -19,7 +20,7 @@ class AnalyticsServiceTest {
     private AnalyticsService service(String logLines) throws Exception {
         Path log = directory.resolve("activity.txt");
         Files.writeString(log, logLines);
-        return new AnalyticsService(log.toString(), clock);
+        return new AnalyticsService(new LogFileActivityRepository(log), clock);
     }
 
     @Test
@@ -70,7 +71,7 @@ class AnalyticsServiceTest {
 
     @Test
     void returnsEmptyDataBeforeTheFirstLogIsCreated() {
-        var service = new AnalyticsService(directory.resolve("missing.txt").toString(), clock);
+        var service = new AnalyticsService(new LogFileActivityRepository(directory.resolve("missing.txt")), clock);
         var report = service.getPlayerReport("Alice", 7);
         assertEquals(0, report.totalSeconds());
         assertNull(report.peakHour());
